@@ -1,9 +1,7 @@
-# nonebot-plugin-yysls
-使用ai编写的自用燕云十六声QQ Bot，可以在群聊推送更新公告、兑换码、每周/月资源兑换提醒。
-
 <div align="center">
-  <h1> NoneBot Plugin - 燕云十六声助手</h1>
+  <h1> NoneBot Plugin - yysls</h1>
   <p>燕云十六声游戏助手：公告推送、兑换码管理、商城与资源提醒</p>
+  <p>使用ai编写的自用燕云十六声QQ Bot，可以在群聊推送更新公告、兑换码、每周/月资源兑换提醒。</p>
   <img src="https://img.shields.io/pypi/v/nonebot-plugin-yysls" alt="PyPI Version">
   <img src="https://img.shields.io/badge/python-3.9+-blue" alt="Python">
   <img src="https://img.shields.io/badge/nonebot-2.2.0+-green" alt="NoneBot2">
