@@ -1,5 +1,6 @@
 import re
 import json
+import asyncio
 from pathlib import Path
 from typing import List, Dict
 
@@ -8,21 +9,25 @@ from nonebot import get_driver, get_bot, logger, require
 
 # 引入 cdkey 模块的添加方法
 from .cdkey import add_cdkey
-# ✅ 修复循环导入：不再从 __init__.py 导入 plugin_config
-#    改为直接从 data_manager 读取订阅群列表
 from .data_manager import load_subscribed_groups
 
 require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler
 
+# 🆕 引入 B 站官方 API 库
+from bilibili_api import user, Credential
+
 # ============ 配置读取 ============
 driver = get_driver()
 config = driver.config
 
-# 从 .env 文件中读取 AI 配置
+# 从 .env 文件中读取配置
 AI_API_KEY = getattr(config, "ai_api_key", "")
 AI_BASE_URL = getattr(config, "ai_base_url", "https://api.openai.com/v1")
 AI_MODEL = getattr(config, "ai_model", "gpt-4o-mini")
+
+BILIBILI_SESSDATA = getattr(config, "bilibili_sessdata", "")
+BILIBILI_BILI_JCT = getattr(config, "bilibili_bili_jct", "")
 
 # ============ 常量与路径 ============
 YYSLS_BILI_UID = 1567141152  # 燕云十六声 B站官号 UID
@@ -30,13 +35,19 @@ DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 HISTORY_FILE = DATA_DIR / "bili_dynamic_history.json"
 
-# B站 API
-BILI_API_URL = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space"
-BILI_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Referer": f"https://space.bilibili.com/{YYSLS_BILI_UID}/dynamic"
-}
+# 🆕 初始化 B 站 Credential（登录凭证）
+credential = None
+if BILIBILI_SESSDATA and BILIBILI_BILI_JCT:
+    credential = Credential(
+        sessdata=BILIBILI_SESSDATA,
+        bili_jct=BILIBILI_BILI_JCT
+    )
+    logger.info("[B站配置] ✅ 已加载 B 站登录凭证")
+else:
+    logger.warning("[B站配置] ⚠️ 未配置 BILIBILI_SESSDATA 或 BILIBILI_BILI_JCT，可能触发风控")
+
+# 初始化 B 站用户对象
+bili_user = user.User(uid=YYSLS_BILI_UID, credential=credential)
 
 # AI Prompt
 SYSTEM_PROMPT = (
@@ -60,28 +71,28 @@ def load_history() -> List[str]:
 
 
 def save_history(history: List[str]):
-    # 只保留最近 50 条记录，防止文件无限增大
     HISTORY_FILE.write_text(
         json.dumps(history[-50:], ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
 
-# ============ B站动态抓取 ============
+# ============ B站动态抓取（带重试机制） ============
 async def fetch_bili_dynamics() -> List[Dict]:
-    """获取B站最新动态"""
-    params = {"host_mid": YYSLS_BILI_UID, "offset": ""}
-    try:
-        async with httpx.AsyncClient(headers=BILI_HEADERS, timeout=15) as client:
-            resp = await client.get(BILI_API_URL, params=params)
-            data = resp.json()
+    """获取B站最新动态（使用官方库 + 3次重试）"""
+    max_retries = 3
+    retry_delay = 2  # 秒
 
-            if data.get("code") != 0:
-                logger.warning(f"[B站抓取] API返回错误: {data.get('message')}")
-                return []
-
-            items = data.get("data", {}).get("items", [])
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.debug(f"[B站抓取] 尝试第 {attempt} 次获取动态...")
+            
+            # 🆕 使用官方库获取动态（自动处理 WBI 签名和风控）
+            dynamics_data = await bili_user.get_dynamics()
+            
+            items = dynamics_data.get("items", [])
             articles = []
+            
             for item in items[:10]:  # 只检查最新 10 条
                 modules = item.get("modules", {})
                 desc = modules.get("module_dynamic", {}).get("desc", {})
@@ -94,10 +105,19 @@ async def fetch_bili_dynamics() -> List[Dict]:
                     "content": desc["text"],
                     "pub_time": modules.get("module_author", {}).get("pub_ts", 0)
                 })
+            
+            logger.success(f"[B站抓取] ✅ 成功获取 {len(articles)} 条动态")
             return articles
-    except Exception as e:
-        logger.error(f"[B站抓取] 网络请求失败: {e}")
-        return []
+
+        except Exception as e:
+            logger.error(f"[B站抓取] ❌ 第 {attempt} 次尝试失败: {e}")
+            if attempt < max_retries:
+                logger.info(f"[B站抓取] ⏳ {retry_delay} 秒后重试...")
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 2  # 指数退避
+            else:
+                logger.error("[B站抓取] 🚨 达到最大重试次数，放弃抓取")
+                return []
 
 
 # ============ 文本清洗与 AI 提取 ============
@@ -145,13 +165,13 @@ async def extract_codes_with_ai(text: str) -> List[Dict]:
 
 
 # ============ 核心处理逻辑 ============
-async def process_new_dynamics():
-    """检查新动态并处理"""
+async def process_new_dynamics() -> int:  # 🆕 1. 增加返回类型提示
+    """检查新动态并处理，返回新发现的兑换码数量"""
     history = load_history()
     dynamics = await fetch_bili_dynamics()
 
     if not dynamics:
-        return
+        return 0  # 🆕 2. 没有动态时返回 0
 
     new_codes_found = []
 
@@ -206,10 +226,11 @@ async def process_new_dynamics():
     if new_codes_found:
         await notify_groups(new_codes_found)
 
+    return len(new_codes_found)  # 🆕 3. 返回新发现的兑换码数量
+
 
 async def notify_groups(codes: List[str]):
     """向已订阅的群聊推送新兑换码"""
-    # ✅ 修复：直接从 data_manager 读取订阅群，避免循环导入 __init__.py
     subscribed_groups = load_subscribed_groups()
 
     if not subscribed_groups:

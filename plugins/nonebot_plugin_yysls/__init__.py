@@ -15,6 +15,7 @@ from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
 from nonebot.adapters.onebot.v11.permission import GROUP_ADMIN, GROUP_OWNER
 
+# ✅ 确保 apscheduler 在导入子模块前被加载
 require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler
 
@@ -43,9 +44,9 @@ from .auto_extract import try_auto_add_cdkey
 
 plugin_config = get_plugin_config(YyslsConfig)
 
-# 从本地文件恢复订阅状态（覆盖默认空集合）
-plugin_config.yysls_subscribe_groups = load_subscribed_groups()
-logger.info(f"[燕云助手] 已从本地恢复 {len(plugin_config.yysls_subscribe_groups)} 个订阅群")
+# 🆕 使用独立变量管理订阅群，避免直接修改 Pydantic Model 属性
+_subscribed_groups: set = load_subscribed_groups()
+logger.info(f"[燕云助手] 已从本地恢复 {len(_subscribed_groups)} 个订阅群")
 
 __plugin_meta__ = PluginMetadata(
     name="燕云十六声助手",
@@ -66,11 +67,13 @@ __plugin_meta__ = PluginMetadata(
 )
 async def _check_news():
     await check_and_push_announcements(
-        subscribe_groups=plugin_config.yysls_subscribe_groups,
+        subscribe_groups=_subscribed_groups,  # ✅ 使用独立变量
         news_url=plugin_config.yysls_news_url,
         base_url=plugin_config.yysls_news_base_url,
     )
 
+# 🆕 注意：B站动态检查的定时任务已在 ai_extractor.py 中通过 @scheduler.scheduled_job 自动注册
+# 当本文件 import ai_extractor 时，该定时任务会自动生效，无需在此处重复注册。
 
 @scheduler.scheduled_job(
     "cron", day=1,
@@ -80,7 +83,7 @@ async def _check_news():
 )
 async def _monthly_shop_reminder_refresh():
     await send_shop_reminder(
-        subscribe_groups=plugin_config.yysls_subscribe_groups,
+        subscribe_groups=_subscribed_groups,  # ✅ 使用独立变量
         shop_items=plugin_config.yysls_shop_items,
         remind_type="refresh",
     )
@@ -94,7 +97,7 @@ async def _monthly_shop_reminder_refresh():
 )
 async def _monthly_shop_reminder_expire():
     await send_shop_reminder(
-        subscribe_groups=plugin_config.yysls_subscribe_groups,
+        subscribe_groups=_subscribed_groups,  # ✅ 使用独立变量
         shop_items=plugin_config.yysls_shop_items,
         remind_type="expire",
     )
@@ -108,7 +111,7 @@ async def _monthly_shop_reminder_expire():
 )
 async def _weekly_digest():
     await send_cdkey_digest(
-        subscribe_groups=plugin_config.yysls_subscribe_groups,
+        subscribe_groups=_subscribed_groups,  # ✅ 使用独立变量
     )
 
 
@@ -116,6 +119,7 @@ async def _weekly_digest():
 #  命令注册
 # ============================================================
 
+# 🆕 优化帮助文本，明确说明 B站AI抓码是全自动的
 HELP_TEXT = """[燕云十六声助手 - 指令菜单]
 ========================
 【日常查询】(所有人可用)
@@ -129,13 +133,8 @@ HELP_TEXT = """[燕云十六声助手 - 指令菜单]
 /edit_note <码> <备注> - 修改兑换码备注
 /expire_cdkey <码> - 标记兑换码为过期
 /re_cdkey <码> - 重新激活已过期的兑换码
-/check_bili - 手动触发检查B站最新动态(测试AI自动捕获兑换码功能)
-
-【兑换码自动识别】(所有人可用)
-发送格式：燕云十六声兑换码：<兑换码>
-示例：燕云十六声兑换码：陈叔邀你下江南 // 燕云十六声兑换码：yysls2026
-支持中英文混合口令，最长10个汉字
-⚠️ 必须包含完整前缀，否则不会识别
+/check_bili - 手动触发检查B站最新动态
+*Bot 会全自动定时巡查B站官方动态，利用 AI 捕获并入库新兑换码，无需手动干预。若有遗漏，可使用上方指令手动补录。
 
 【订阅与系统】(仅管理员)
 /yysls_sub (订阅燕云) - 开启本群自动推送
@@ -258,7 +257,7 @@ async def _(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     await handle_expire_cdkey(bot, event, args)
 
 
-# --- /check_bili 手动检查B站动态（统一管理在此处） ---
+# --- /check_bili 手动检查B站动态 ---
 check_bili_cmd = on_command(
     "check_bili",
     priority=5,
@@ -270,8 +269,13 @@ check_bili_cmd = on_command(
 async def _(bot: Bot, event: MessageEvent):
     await bot.send(event, "🔍 正在检查 B站官方动态，请稍候...")
     try:
-        await process_new_dynamics()
-        await bot.send(event, "✅ B站动态检查完成！\n如有新兑换码已自动入库并推送。")
+        # 🆕 接收 process_new_dynamics 的返回值（新发现的兑换码数量）
+        new_codes_count = await process_new_dynamics()
+        
+        if new_codes_count and new_codes_count > 0:
+            await bot.send(event, f"✅ B站动态检查完成！\n🎉 发现 {new_codes_count} 个新兑换码，已自动入库并推送至订阅群。")
+        else:
+            await bot.send(event, "✅ B站动态检查完成！\n当前暂无新的兑换码。")
     except Exception as e:
         logger.error(f"[手动检查] 执行失败: {e}")
         await bot.send(event, f"❌ 检查失败，请查看后台日志：{e}")
@@ -303,12 +307,12 @@ async def _(bot: Bot, event: MessageEvent):
         return
 
     group_id = event.group_id
-    if group_id in plugin_config.yysls_subscribe_groups:
+    if group_id in _subscribed_groups:  # ✅ 使用独立变量
         await bot.send(event, f"本群 ({group_id}) 已在订阅列表中，无需重复订阅")
         return
 
-    plugin_config.yysls_subscribe_groups.add(group_id)
-    save_subscribed_groups(plugin_config.yysls_subscribe_groups)
+    _subscribed_groups.add(group_id)  # ✅ 使用独立变量
+    save_subscribed_groups(_subscribed_groups)  # ✅ 使用独立变量
     await bot.send(event, f"本群 ({group_id}) 已订阅燕云十六声公告推送！")
 
 
@@ -323,12 +327,12 @@ async def _(bot: Bot, event: MessageEvent):
         return
 
     group_id = event.group_id
-    if group_id not in plugin_config.yysls_subscribe_groups:
+    if group_id not in _subscribed_groups:  # ✅ 使用独立变量
         await bot.send(event, f"本群 ({group_id}) 未订阅，无需取消")
         return
 
-    plugin_config.yysls_subscribe_groups.discard(group_id)
-    save_subscribed_groups(plugin_config.yysls_subscribe_groups)
+    _subscribed_groups.discard(group_id)  # ✅ 使用独立变量
+    save_subscribed_groups(_subscribed_groups)  # ✅ 使用独立变量
     await bot.send(event, f"本群 ({group_id}) 已取消订阅燕云十六声公告推送")
 
 
@@ -336,7 +340,7 @@ async def _(bot: Bot, event: MessageEvent):
 async def _(bot: Bot, event: MessageEvent):
     is_subscribed = (
         isinstance(event, GroupMessageEvent)
-        and event.group_id in plugin_config.yysls_subscribe_groups
+        and event.group_id in _subscribed_groups  # ✅ 使用独立变量
     )
 
     from .cdkey import get_active_cdkeys
@@ -346,9 +350,10 @@ async def _(bot: Bot, event: MessageEvent):
         f"[燕云十六声助手 - 运行状态]\n"
         f"========================\n"
         f"公告检查间隔: {plugin_config.yysls_check_interval} 分钟\n"
-        f"订阅群数量: {len(plugin_config.yysls_subscribe_groups)} 个\n"
+        f"订阅群数量: {len(_subscribed_groups)} 个\n"  # ✅ 使用独立变量
         f"可用兑换码: {active_count} 个\n"
         f"商城提醒: 每月1日 & 月末最后一天 {plugin_config.yysls_shop_remind_hour}:00\n"
+        f"B站AI抓码: 每 60 分钟自动巡查\n"  # 🆕 补充 B站状态
         f"========================\n"
     )
 
@@ -357,8 +362,8 @@ async def _(bot: Bot, event: MessageEvent):
         msg += f"本群订阅状态: {sub_status}"
     else:
         groups_str = (
-            ", ".join(map(str, plugin_config.yysls_subscribe_groups))
-            if plugin_config.yysls_subscribe_groups else "无"
+            ", ".join(map(str, _subscribed_groups))  # ✅ 使用独立变量
+            if _subscribed_groups else "无"
         )
         msg += f"订阅群号: {groups_str}"
 

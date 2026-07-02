@@ -3,3 +3,4 @@ nonebot-adapter-onebot
 nonebot-plugin-apscheduler
 httpx
 beautifulsoup4
+bilibili-api-python
