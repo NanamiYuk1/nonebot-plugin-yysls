@@ -1,7 +1,7 @@
 <div align="center">
   <h1>🎮 NoneBot Plugin - yysls</h1>
   <p><strong>燕云十六声bot</strong>：公告推送 · 兑换码管理 · 商城与资源提醒</p>
-  <p><sub>使用 AI 辅助编写的自用燕云十六声 QQ Bot 插件</sub></p>
+  <p>使用 AI 辅助编写的自用燕云十六声 QQ Bot 插件</p>
 
   <img src="https://img.shields.io/pypi/v/nonebot-plugin-yysls" alt="PyPI Version">
   <img src="https://img.shields.io/badge/python-3.9+-blue" alt="Python">
