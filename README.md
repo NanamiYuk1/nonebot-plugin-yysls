@@ -1,6 +1,6 @@
 <div align="center">
   <h1>🎮 NoneBot Plugin - yysls</h1>
-  <p><strong>燕云十六声bot</strong>：公告推送 · 兑换码管理 · 商城与资源提醒</p>
+  <p><strong>燕云十六声 Bot</strong>：公告推送 · 兑换码管理 · 商城与资源提醒</p>
   <p>使用 AI 辅助编写的自用燕云十六声 QQ Bot 插件</p>
 
   <img src="https://img.shields.io/pypi/v/nonebot-plugin-yysls" alt="PyPI Version">
@@ -9,11 +9,21 @@
   <img src="https://img.shields.io/badge/license-MIT-orange" alt="License">
 </div>
 
+---
+
 ## ✨ 功能特性
 
 - 📢 **官网公告自动推送**：版本更新、维护公告实时同步
 - 🔑 **兑换码智能管理**：支持全员自动识别录入 + 防刷屏恶意防护
 - 📋 **资源清单推送**：每周 / 每月必换资源定时推送提醒
+
+---
+
+<div align="center">
+  <img src="https://i.ibb.co/dwTj8q1R/qq.jpg" alt="qq Bot" width="300" />
+  <p> 扫码添加已部署的燕云十六声 Bot
+  （该bot存在其他功能，若只需要燕云功能，可自行部署服务）</p>
+</div>
 
 ---
 
@@ -54,6 +64,7 @@
 | `/edit_note <码> <备注>` | `set_note` / `修改备注` | 修改指定兑换码的备注信息 |
 | `/expire_cdkey <码>` | — | 手动标记指定兑换码为过期 |
 | `/re_cdkey <码>` | `重新激活兑换码` / `恢复兑换码` | 重新激活已过期的兑换码 |
+| `/check_bili` | — | 手动触发检查B站最新动态(测试AI自动捕获兑换码功能) |
 | `/yysls_sub` | `订阅燕云` | 开启本群公告与提醒自动推送 |
 | `/yysls_unsub` | `取消订阅燕云` | 关闭本群公告与提醒自动推送 |
 | `/yysls_status` | `燕云状态` | 查看插件运行状态、订阅情况与兑换码数量 |
@@ -62,42 +73,164 @@
 
 ---
 
-## 📦 安装
+## 🚀 快速开始
 
-### 使用 nb-cli（推荐）
+### 📦 1. 安装插件与依赖
+
+#### 使用 nb-cli（推荐）
 
 ```bash
 nb plugin install nonebot-plugin-yysls
-
 ```
 
-### 使用 pip
+#### 使用 pip
 
 ```bash
 pip install nonebot-plugin-yysls
+```
 
+#### 使用 requirements.txt
+
+运行以下命令安装依赖：
+
+```bash
+pip install -r requirements.txt
 ```
 
 安装后在 `bot.py` 或 `pyproject.toml` 中加载插件：
 
 ```python
 nonebot.load_plugin("nonebot_plugin_yysls")
-
 ```
 
 ---
 
-## ⚙️ 配置项
 
-在 `.env` / `.env.prod` 中添加以下配置：
+### ⚙️ 2. 配置 `.env` 文件
 
-| 配置项 | 类型 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `YYSLS_CHECK_INTERVAL` | int | `30` | 公告检查间隔（分钟） |
-| `YYSLS_NEWS_URL` | str | *(内置)* | 官网公告 API 地址 |
-| `YYSLS_SHOP_REMIND_HOUR` | int | `10` | 商城提醒触发时间（小时） |
+在项目根目录创建或编辑 `.env` / `.env.prod` 文件，添加以下配置：
 
-> 完整配置项及默认值请参考插件源码中的 `config.py`。
+```ini
+# ============ NoneBot 基础配置 ============
+# Bot 超级用户 QQ 号（用于接收私聊通知和管理权限，填写你自己的 QQ）
+SUPERUSERS=["123456789"]
+
+# 命令起始符（支持多个）
+COMMAND_START=["/", ""]
+
+# 命令分隔符
+COMMAND_SEP=[" "]
+
+# ============ 反向 WebSocket 驱动配置 ============
+# 使用 websockets 驱动
+DRIVER=~websockets
+
+# 监听地址与端口（需与 NapCat 配置中的目标端口一致）
+HOST=0.0.0.0
+PORT=8080
+
+# ============ 燕云十六声插件配置 ============
+# 公告检查间隔（分钟）
+YYSLS_CHECK_INTERVAL=30
+
+# 商城提醒触发时间（24小时制，小时）
+YYSLS_SHOP_REMIND_HOUR=10
+
+# 官网公告 API 地址（通常无需修改，使用内置默认值即可）
+# YYSLS_NEWS_URL=https://yysls.qq.com/act/a20240605news/index.html
+```
+
+> 📝 **配置说明**：
+> - `SUPERUSERS`：务必替换为你自己的 QQ 号，否则无法使用管理员指令。
+> - `PORT`：反向 WebSocket 监听端口，需与下方 NapCat 配置中的端口保持一致。
+> - 完整配置项及默认值请参考插件源码中的 `config.py`。
+
+---
+
+### 🤖 3. 连接 NapCat（反向 WebSocket）
+
+[NapCat](https://github.com/NapNeko/NapCatQQ) 是基于 QQNT 的无头 QQ 客户端，支持 OneBot 11 协议。本插件推荐使用**反向 WebSocket** 方式连接。
+
+#### 步骤 1：安装并登录 NapCat
+
+1. 前往 [NapCat Releases](https://github.com/NapNeko/NapCatQQ/releases) 下载最新版本。
+2. 解压到任意目录（如 `C:\NapCat`）。
+3. 运行启动脚本（Windows 为 `launcher.bat`，Linux 为 `launcher.sh`）。
+4. 使用手机 QQ 扫码登录 Bot 账号。
+
+#### 步骤 2：配置 NapCat 反向 WebSocket
+
+在 NapCat 配置目录中找到 `config/onebot11_<你的Bot QQ号>.json`（或使用 WebUI 配置），修改网络配置如下：
+
+```json
+{
+  "network": {
+    "reverseWs": [
+      {
+        "enable": true,
+        "urls": [
+          "ws://127.0.0.1:8080/onebot/v11/ws"
+        ]
+      }
+    ]
+  },
+  "message": {
+    "postSelfMessage": false,
+    "ignoreSelfMessage": true
+  }
+}
+```
+
+> ⚠️ **重要提示**：
+> - `urls` 中的端口 `8080` 必须与 `.env` 文件中配置的 `PORT` 完全一致。
+> - 确保 `reverseWs` 的 `enable` 字段为 `true`。
+> - 如果 NoneBot 与 NapCat 不在同一台机器上，请将 `127.0.0.1` 替换为 NoneBot 所在服务器的局域网 IP 或公网 IP。
+
+#### 步骤 3：验证连接
+
+启动 NapCat 后，观察 NapCat 的控制台日志。如果看到类似以下输出，说明连接成功：
+
+```log
+[INFO] 反向 WebSocket 连接成功：ws://127.0.0.1:8080/onebot/v11/ws
+```
+
+---
+
+### 🎯 4. 启动服务
+
+确保 NapCat 已启动且连接成功后，再启动 NoneBot 服务。
+
+#### 方式 1：使用 nb-cli（推荐）
+
+在项目根目录执行：
+
+```bash
+nb run
+```
+
+#### 方式 2：直接运行 bot.py
+
+```bash
+python bot.py
+```
+
+#### 启动成功标志
+
+当控制台出现以下日志时，表示服务已成功启动并加载插件：
+
+```log
+[INFO] nonebot | NoneBot is initializing...
+[INFO] nonebot | Running NoneBot...
+[INFO] uvicorn | Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
+[INFO] nonebot | Succeeded to load plugin "nonebot_plugin_yysls"
+```
+
+#### 验证 Bot 是否正常工作
+
+1. 将 Bot 账号拉入目标 QQ 群。
+2. 在群内发送 `/yysls_help` 或 `燕云帮助`。
+3. 此时 Bot 应该会回复帮助菜单。
+4. 管理员发送 `/yysls_sub` 开启该群的自动推送功能。
 
 ---
 
@@ -105,6 +238,14 @@ nonebot.load_plugin("nonebot_plugin_yysls")
 
 见 [CHANGELOG.md](./CHANGELOG.md)
 
+---
+
 ## 📄 许可证
 
 本项目采用 [MIT License](./LICENSE) 开源
+
+---
+
+<div align="center">
+  <p>如果这个项目对你有帮助，请给一个 ⭐️ Star 支持！</p>
+</div>

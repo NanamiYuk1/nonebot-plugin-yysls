@@ -5,6 +5,7 @@ NoneBot2 插件 - 燕云十六声 助手
   2. 兑换码管理与查询（含转发消息自动解析中文/英文兑换码）
   3. 每月商城限时道具提醒
   4. 每周/每月必换资源清单提醒
+  5. B站动态 AI 自动抓取与兑换码提取
 """
 
 from nonebot import get_plugin_config, on_command, on_message, require, logger
@@ -12,6 +13,7 @@ from nonebot.plugin import PluginMetadata
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent, Message, GroupMessageEvent
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
+from nonebot.adapters.onebot.v11.permission import GROUP_ADMIN, GROUP_OWNER
 
 require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler
@@ -19,6 +21,7 @@ from nonebot_plugin_apscheduler import scheduler
 from .config import YyslsConfig
 from .data_manager import load_subscribed_groups, save_subscribed_groups
 from .announcements import check_and_push_announcements
+from .ai_extractor import process_new_dynamics
 from .cdkey import (
     handle_cdkey_list,
     handle_add_cdkey,
@@ -40,17 +43,13 @@ from .auto_extract import try_auto_add_cdkey
 
 plugin_config = get_plugin_config(YyslsConfig)
 
-# 使用示例
-# print(plugin_config.yysls_subscribe_groups) # 如果 .env 里配了，这里就是真实群号
-# print(plugin_config.yysls_news_url)         # 如果 .env 里没配，这里就是默认的官网地址
-
 # 从本地文件恢复订阅状态（覆盖默认空集合）
 plugin_config.yysls_subscribe_groups = load_subscribed_groups()
 logger.info(f"[燕云助手] 已从本地恢复 {len(plugin_config.yysls_subscribe_groups)} 个订阅群")
 
 __plugin_meta__ = PluginMetadata(
     name="燕云十六声助手",
-    description="燕云十六声游戏助手：公告推送、兑换码管理、商城与资源提醒",
+    description="燕云十六声游戏助手：公告推送、兑换码管理、商城与资源提醒、B站AI抓码",
     usage="发送 /yysls_help 或 燕云帮助 查看完整指令菜单",
     config=YyslsConfig,
 )
@@ -130,6 +129,7 @@ HELP_TEXT = """[燕云十六声助手 - 指令菜单]
 /edit_note <码> <备注> - 修改兑换码备注
 /expire_cdkey <码> - 标记兑换码为过期
 /re_cdkey <码> - 重新激活已过期的兑换码
+/check_bili - 手动触发检查B站最新动态(测试AI自动捕获兑换码功能)
 
 【兑换码自动识别】(所有人可用)
 发送格式：燕云十六声兑换码：<兑换码>
@@ -258,6 +258,25 @@ async def _(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     await handle_expire_cdkey(bot, event, args)
 
 
+# --- /check_bili 手动检查B站动态（统一管理在此处） ---
+check_bili_cmd = on_command(
+    "check_bili",
+    priority=5,
+    block=True,
+    permission=SUPERUSER | GROUP_ADMIN | GROUP_OWNER,
+)
+
+@check_bili_cmd.handle()
+async def _(bot: Bot, event: MessageEvent):
+    await bot.send(event, "🔍 正在检查 B站官方动态，请稍候...")
+    try:
+        await process_new_dynamics()
+        await bot.send(event, "✅ B站动态检查完成！\n如有新兑换码已自动入库并推送。")
+    except Exception as e:
+        logger.error(f"[手动检查] 执行失败: {e}")
+        await bot.send(event, f"❌ 检查失败，请查看后台日志：{e}")
+
+
 # --- 群订阅管理 ---
 sub_cmd = on_command("yysls_sub", aliases={"订阅燕云"}, priority=5, block=True)
 unsub_cmd = on_command("yysls_unsub", aliases={"取消订阅燕云"}, priority=5, block=True)
@@ -315,7 +334,10 @@ async def _(bot: Bot, event: MessageEvent):
 
 @status_cmd.handle()
 async def _(bot: Bot, event: MessageEvent):
-    is_subscribed = isinstance(event, GroupMessageEvent) and event.group_id in plugin_config.yysls_subscribe_groups
+    is_subscribed = (
+        isinstance(event, GroupMessageEvent)
+        and event.group_id in plugin_config.yysls_subscribe_groups
+    )
 
     from .cdkey import get_active_cdkeys
     active_count = len(get_active_cdkeys())
@@ -334,7 +356,10 @@ async def _(bot: Bot, event: MessageEvent):
         sub_status = "[已订阅]" if is_subscribed else "[未订阅]"
         msg += f"本群订阅状态: {sub_status}"
     else:
-        groups_str = ", ".join(map(str, plugin_config.yysls_subscribe_groups)) if plugin_config.yysls_subscribe_groups else "无"
+        groups_str = (
+            ", ".join(map(str, plugin_config.yysls_subscribe_groups))
+            if plugin_config.yysls_subscribe_groups else "无"
+        )
         msg += f"订阅群号: {groups_str}"
 
     await bot.send(event, msg)
@@ -359,7 +384,7 @@ async def _(bot: Bot, event: MessageEvent):
     if event.self_id == event.user_id:
         return
 
-    # 3. 🔒 强制前置触发词校验（兼容全半角冒号）
+    # 3. 强制前置触发词校验（兼容全半角冒号）
     text = event.get_plaintext().strip()
     normalized_text = text.replace(":", "：")
     if AUTO_EXTRACT_TRIGGER not in normalized_text:

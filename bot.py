@@ -1,12 +1,12 @@
 import nonebot
-from nonebot.adapters.onebot.v11 import Adapter as ONEBOT_V11Adapter
+from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 
 nonebot.init()
 
 driver = nonebot.get_driver()
-driver.register_adapter(ONEBOT_V11Adapter)
+driver.register_adapter(OneBotV11Adapter)
 
-# 关键：从 plugins 文件夹中加载所有插件
+# ✅ 只需要这一行，自动扫描 plugins/ 目录下所有插件
 nonebot.load_plugins("plugins")
 
 if __name__ == "__main__":
