@@ -1,6 +1,6 @@
 <div align="center">
-  <h1>🎮 NoneBot Plugin - YYSLs</h1>
-  <p><strong>燕云十六声游戏助手</strong>：公告推送 · 兑换码管理 · 商城与资源提醒</p>
+  <h1>🎮 NoneBot Plugin - yysls</h1>
+  <p><strong>燕云十六声bot</strong>：公告推送 · 兑换码管理 · 商城与资源提醒</p>
   <p><sub>使用 AI 辅助编写的自用燕云十六声 QQ Bot 插件</sub></p>
 
   <img src="https://img.shields.io/pypi/v/nonebot-plugin-yysls" alt="PyPI Version">
@@ -13,8 +13,7 @@
 
 - 📢 **官网公告自动推送**：版本更新、维护公告实时同步
 - 🔑 **兑换码智能管理**：支持全员自动识别录入 + 防刷屏恶意防护
-- 🛒 **商城限时提醒**：每月商城必换道具到期 / 刷新双提醒
-- 📋 **资源清单推送**：每周 / 每月必换资源定时汇总推送
+- 📋 **资源清单推送**：每周 / 每月必换资源定时推送提醒
 
 ---
 
@@ -37,7 +36,6 @@
 
 ```text
 燕云十六声兑换码：<兑换码>
-
 ```
 
 > **示例**：
