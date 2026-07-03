@@ -344,7 +344,8 @@ async def _(bot: Bot, event: MessageEvent):
     )
 
     from .cdkey import get_active_cdkeys
-    active_count = len(get_active_cdkeys())
+    active_keys = await get_active_cdkeys()  # 🆕 加上 await 等待异步执行完成
+    active_count = len(active_keys)
 
     msg = (
         f"[燕云十六声助手 - 运行状态]\n"
@@ -353,7 +354,7 @@ async def _(bot: Bot, event: MessageEvent):
         f"订阅群数量: {len(_subscribed_groups)} 个\n"  # ✅ 使用独立变量
         f"可用兑换码: {active_count} 个\n"
         f"商城提醒: 每月1日 & 月末最后一天 {plugin_config.yysls_shop_remind_hour}:00\n"
-        f"B站AI抓码: 每 60 分钟自动巡查\n"  # 🆕 补充 B站状态
+        f"B站AI抓码: 每 24 小时自动巡查\n"  # 🆕 补充 B站状态
         f"========================\n"
     )
 

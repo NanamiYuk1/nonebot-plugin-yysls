@@ -87,7 +87,9 @@ async def send_cdkey_digest(subscribe_groups: Set[int]):
         return
         
     from .cdkey import get_active_cdkeys
-    active = get_active_cdkeys()
+    
+    # 🆕 修复：加上 await 等待异步函数执行完毕，获取真实的列表
+    active = await get_active_cdkeys()
 
     # 组装兑换码部分
     if active:
