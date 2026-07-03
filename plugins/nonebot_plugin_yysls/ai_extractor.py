@@ -255,7 +255,7 @@ async def notify_groups(codes: List[str]):
 # ============ 定时任务 ============
 @scheduler.scheduled_job(
     "interval",
-    minutes=60,  # 每 60 分钟检查一次
+    minutes=1440,  # 每 1440 分钟 = 24 小时检查一次
     id="yysls_bili_ai_extractor",
     misfire_grace_time=60,
 )
