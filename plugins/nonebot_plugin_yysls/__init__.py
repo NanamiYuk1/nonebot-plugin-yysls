@@ -213,7 +213,7 @@ async def _(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
         if len(code) < 4:
             error_lines.append(f"格式错误: {line}")
             continue
-        result = add_cdkey(code, source="管理员批量录入", note=note)
+        result = await add_cdkey(code, source="管理员批量录入", note=note)
         if result == "added":
             success_added += 1
         elif result == "reactivated":
