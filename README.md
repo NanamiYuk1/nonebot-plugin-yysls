@@ -141,11 +141,15 @@ AI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 AI_MODEL=qwen-turbo
 
 # B站API配置
-# Cookie 获取方式
-# 登录 B 站 → F12 打开开发者工具 → Application → Cookies
-# 找到 SESSDATA 和 bili_jct 的值
-BILIBILI_SESSDATA="您的SESSDATA值"
-BILIBILI_BILI_JCT="您的bili_jct值"
+# Cookie 获取方式：
+# 1. 浏览器登录 B 站 (www.bilibili.com)
+# 2. 按 F12 打开开发者工具 → 顶部菜单选择 Application (应用)
+# 3. 左侧展开 Cookies → 点击 https://www.bilibili.com
+# 4. 在右侧列表中找到 SESSDATA、bili_jct、buvid3，将它们的 Value 复制填入下方
+
+BILIBILI_SESSDATA="这里填入你的SESSDATA值"
+BILIBILI_BILI_JCT="这里填入你的bili_jct值"
+BILIBILI_BUVID3="这里填入你的buvid3值"
 ```
 
 > 📝 **配置说明**：
