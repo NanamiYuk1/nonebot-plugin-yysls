@@ -311,7 +311,7 @@ async def notify_groups(codes: List[str]):
 # ============ 定时任务 ============
 @scheduler.scheduled_job(
     "interval",
-    minutes=60,  # 建议保持 60 分钟，1440分钟(24小时)太容易漏掉限时兑换码
+    minutes=1440,  # 1440分钟(24小时)查询一次
     id="yysls_bili_ai_extractor",
     misfire_grace_time=60,
 )
