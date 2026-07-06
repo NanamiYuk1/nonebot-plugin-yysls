@@ -69,25 +69,21 @@ SYSTEM_PROMPT = (
     "如果没有发现任何有效兑换码，返回 {\"codes\": []}。"
 )
 
-
-# ============ 历史记录管理 ============
-def load_history() -> List[str]:
+# ============ 历史记录管理 (改为异步) ============
+async def load_history() -> List[str]:
     if HISTORY_FILE.exists():
         try:
-            return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+            text = await asyncio.to_thread(HISTORY_FILE.read_text, encoding="utf-8")
+            return json.loads(text)
         except json.JSONDecodeError:
             logger.warning(f"[AI提取] 历史文件 {HISTORY_FILE} 解析失败，使用空列表")
             return []
     return []
 
-
-def save_history(history: List[str]):
+async def save_history(history: List[str]):
     # 只保留最近 100 条，防止文件无限膨胀
-    HISTORY_FILE.write_text(
-        json.dumps(history[-100:], ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
+    data = json.dumps(history[-100:], ensure_ascii=False, indent=2)
+    await asyncio.to_thread(HISTORY_FILE.write_text, data, encoding="utf-8")
 
 # ============ B站动态抓取（单次请求，遇风控直接放弃） ============
 async def fetch_bili_dynamics() -> List[Dict]:
@@ -154,14 +150,12 @@ async def fetch_bili_dynamics() -> List[Dict]:
     # 🆕 遇到错误直接返回空列表，不再进行无意义的重试
     return []
 
-
 # ============ 文本清洗与 AI 提取 ============
 def clean_bili_text(text: str) -> str:
     """清洗B站动态文本，移除表情和@"""
-    text = re.sub(r'  $ [\u4e00-\u9fa5a-zA-Z0-9]+ $  ', '', text)
+    text = re.sub(r'   $  [\u4e00-\u9fa5a-zA-Z0-9]+  $   ', '', text)
     text = re.sub(r'@[\w\s]+', '', text)
     return text.strip()
-
 
 def clean_json_response(text: str) -> str:
     """清洗大模型返回的 JSON 字符串，去除 Markdown 标记"""
@@ -173,7 +167,6 @@ def clean_json_response(text: str) -> str:
     if text.endswith("```"):
         text = text[:-3]
     return text.strip()
-
 
 async def extract_codes_with_ai(text: str) -> List[Dict]:
     """调用 LLM 提取兑换码"""
@@ -217,11 +210,10 @@ async def extract_codes_with_ai(text: str) -> List[Dict]:
         logger.error(f"[AI提取] LLM 请求或解析失败: {e}")
         return []
 
-
 # ============ 核心处理逻辑 ============
 async def process_new_dynamics() -> int:
     """检查新动态并处理，返回新发现的兑换码数量"""
-    history = load_history()
+    history = await load_history()
     dynamics = await fetch_bili_dynamics()
 
     if not dynamics:
@@ -264,7 +256,8 @@ async def process_new_dynamics() -> int:
             # 补充来源备注
             final_note = f"{note} (B站动态)" if note else "来源: B站官方动态"
 
-            result = add_cdkey(code, source="AI自动提取", note=final_note)
+            # 🔥 核心修复：必须 await 异步函数
+            result = await add_cdkey(code, source="AI自动提取", note=final_note)
             if result in ["added", "reactivated"]:
                 logger.success(f"[AI提取] 新码入库: {code}")
                 new_codes_found.append(code)
@@ -274,7 +267,7 @@ async def process_new_dynamics() -> int:
 
     # 保存历史
     if dynamics:
-        save_history(history)
+        await save_history(history)
 
     # 5. 推送通知到群
     if new_codes_found:
@@ -282,10 +275,10 @@ async def process_new_dynamics() -> int:
 
     return len(new_codes_found)
 
-
 async def notify_groups(codes: List[str]):
     """向已订阅的群聊推送新兑换码"""
-    subscribed_groups = load_subscribed_groups()
+    # 改为 await 获取最新订阅群
+    subscribed_groups = await load_subscribed_groups()
 
     if not subscribed_groups:
         return
@@ -306,7 +299,6 @@ async def notify_groups(codes: List[str]):
                 logger.error(f"[通知] 发送群 {group_id} 失败: {e}")
     except Exception as e:
         logger.error(f"[通知] 获取 Bot 实例失败: {e}")
-
 
 # ============ 定时任务 ============
 @scheduler.scheduled_job(

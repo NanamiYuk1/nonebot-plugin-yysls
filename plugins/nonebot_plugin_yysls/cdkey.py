@@ -15,24 +15,27 @@ DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 CDKEY_FILE = DATA_DIR / "cdkeys.json"
 
-# 🌟 新增：文件读写锁，防止并发冲突
+# 🌟 文件读写锁，防止并发冲突
 _file_lock = asyncio.Lock()
 
-
-async def load_cdkeys() -> List[Dict]:
+async def load_cd_keys() -> List[Dict]:
     async with _file_lock:
         if CDKEY_FILE.exists():
-            return json.loads(CDKEY_FILE.read_text(encoding="utf-8"))
+            try:
+                text = await asyncio.to_thread(CDKEY_FILE.read_text, encoding="utf-8")
+                return json.loads(text)
+            except Exception as e:
+                logger.error(f"[兑换码] 读取文件失败: {e}")
+                return []
         return []
-
 
 async def save_cdkeys(cdkeys: List[Dict]):
     async with _file_lock:
-        CDKEY_FILE.write_text(
-            json.dumps(cdkeys, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-
+        try:
+            data = json.dumps(cdkeys, ensure_ascii=False, indent=2)
+            await asyncio.to_thread(CDKEY_FILE.write_text, data, encoding="utf-8")
+        except Exception as e:
+            logger.error(f"[兑换码] 保存文件失败: {e}")
 
 async def add_cdkey(code: str, source: str = "手动录入", note: str = "") -> str:
     """
@@ -43,7 +46,7 @@ async def add_cdkey(code: str, source: str = "手动录入", note: str = "") -> 
       - "updated": 已存在但更新了备注
       - "exists": 码已存在且未过期（无备注更新）
     """
-    cdkeys = await load_cdkeys()
+    cdkeys = await load_cd_keys()
     for item in cdkeys:
         if item["code"] == code:
             if item.get("expired"):
@@ -71,15 +74,13 @@ async def add_cdkey(code: str, source: str = "手动录入", note: str = "") -> 
     await save_cdkeys(cdkeys)
     return "added"
 
-
 async def get_active_cdkeys() -> List[Dict]:
     """获取所有未过期的兑换码"""
-    cdkeys = await load_cdkeys()
+    cdkeys = await load_cd_keys()
     return [item for item in cdkeys if not item.get("expired", False)]
 
-
 async def mark_cdkey_expired(code: str) -> bool:
-    cdkeys = await load_cdkeys()
+    cdkeys = await load_cd_keys()
     for item in cdkeys:
         if item["code"] == code:
             item["expired"] = True
@@ -87,9 +88,8 @@ async def mark_cdkey_expired(code: str) -> bool:
             return True
     return False
 
-
 async def reactivate_cdkey(code: str) -> bool:
-    cdkeys = await load_cdkeys()
+    cdkeys = await load_cd_keys()
     for item in cdkeys:
         if item["code"] == code and item.get("expired"):
             item["expired"] = False
@@ -98,17 +98,15 @@ async def reactivate_cdkey(code: str) -> bool:
             return True
     return False
 
-
 async def update_cdkey_note(code: str, note: str) -> bool:
     """单独更新兑换码的备注"""
-    cdkeys = await load_cdkeys()
+    cdkeys = await load_cd_keys()
     for item in cdkeys:
         if item["code"] == code:
             item["note"] = note
             await save_cdkeys(cdkeys)
             return True
     return False
-
 
 # ============ 命令处理函数 ============
 
@@ -128,7 +126,6 @@ async def handle_cdkey_list(bot: Bot, event: MessageEvent):
 
     msg_lines.append("\n请尽快兑换，过期不候哦！")
     await bot.send(event, "\n".join(msg_lines))
-
 
 async def handle_add_cdkey(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     """管理员添加兑换码"""
@@ -151,7 +148,6 @@ async def handle_add_cdkey(bot: Bot, event: MessageEvent, args: Message = Comman
     else:
         await bot.send(event, f"兑换码 {code} 已存在且正在生效中，无需重复添加！")
 
-
 async def handle_expire_cdkey(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     """标记兑换码过期"""
     code = args.extract_plain_text().strip().upper()
@@ -164,7 +160,6 @@ async def handle_expire_cdkey(bot: Bot, event: MessageEvent, args: Message = Com
     else:
         await bot.send(event, f"未找到兑换码 {code}")
 
-
 async def handle_reactivate_cdkey(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     """重新激活兑换码"""
     code = args.extract_plain_text().strip().upper()
@@ -176,7 +171,6 @@ async def handle_reactivate_cdkey(bot: Bot, event: MessageEvent, args: Message =
         await bot.send(event, f"兑换码 {code} 已重新激活！")
     else:
         await bot.send(event, f"未找到已过期的兑换码 {code}，或该码当前仍可用。")
-
 
 async def handle_edit_note(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     """单独新增或修改已有兑换码的备注"""
@@ -198,7 +192,6 @@ async def handle_edit_note(bot: Bot, event: MessageEvent, args: Message = Comman
         await bot.send(event, f"成功！兑换码 {code} 的备注已更新为：{note}")
     else:
         await bot.send(event, f"未找到兑换码 {code}，请检查兑换码是否正确。")
-
 
 # ============ 🌟 智能过期识别与自动清理 ============
 
@@ -241,7 +234,6 @@ def extract_expiry_date(note: str) -> Optional[datetime]:
 
     return None
 
-
 # 🌟 定时任务：每天凌晨 00:05 自动检查并清理过期兑换码
 @scheduler.scheduled_job(
     "cron",
@@ -252,7 +244,7 @@ def extract_expiry_date(note: str) -> Optional[datetime]:
 )
 async def auto_expire_cdkeys():
     """自动将到达过期时间的兑换码标记为过期"""
-    cdkeys = await load_cdkeys()
+    cdkeys = await load_cd_keys()
     now = datetime.now()
     expired_count = 0
     expired_codes = []

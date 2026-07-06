@@ -1,5 +1,6 @@
 import re
 import json
+import asyncio
 from pathlib import Path
 from typing import List, Dict, Optional, Set
 from nonebot import logger, get_bot
@@ -14,7 +15,7 @@ PUSHED_CACHE_FILE = DATA_DIR / "pushed_announcements.json"
 # 内存缓存，避免频繁读写磁盘
 _pushed_cache: Optional[Set[str]] = None
 
-def load_pushed_cache() -> Set[str]:
+async def load_pushed_cache() -> Set[str]:
     """加载已推送公告的链接集合"""
     global _pushed_cache
     if _pushed_cache is not None:
@@ -22,7 +23,8 @@ def load_pushed_cache() -> Set[str]:
     
     if PUSHED_CACHE_FILE.exists():
         try:
-            data = json.loads(PUSHED_CACHE_FILE.read_text(encoding="utf-8"))
+            text = await asyncio.to_thread(PUSHED_CACHE_FILE.read_text, encoding="utf-8")
+            data = json.loads(text)
             # 兼容旧格式或新格式
             if isinstance(data, list):
                 _pushed_cache = set(data)
@@ -37,17 +39,15 @@ def load_pushed_cache() -> Set[str]:
     logger.debug(f"[燕云助手] 已加载 {len(_pushed_cache)} 条历史公告缓存")
     return _pushed_cache
 
-def save_pushed_cache(cache: Set[str]):
+async def save_pushed_cache(cache: Set[str]):
     """保存已推送公告缓存到磁盘"""
     global _pushed_cache
     _pushed_cache = cache
     try:
         # 只保留最近 200 条记录，防止文件无限膨胀
         trimmed = list(cache)[-200:]
-        PUSHED_CACHE_FILE.write_text(
-            json.dumps(trimmed, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        data = json.dumps(trimmed, ensure_ascii=False)
+        await asyncio.to_thread(PUSHED_CACHE_FILE.write_text, data, encoding="utf-8")
     except Exception as e:
         logger.error(f"[燕云助手] 保存公告缓存失败: {e}")
 
@@ -97,7 +97,7 @@ async def check_and_push_announcements(
             logger.warning("[燕云助手] 未解析到有效公告")
             return
 
-        pushed_cache = load_pushed_cache()
+        pushed_cache = await load_pushed_cache()
         new_announcements = []
 
         # 筛选出未推送过的新公告
@@ -131,7 +131,7 @@ async def check_and_push_announcements(
         # 批量更新缓存
         if success_links:
             pushed_cache.update(success_links)
-            save_pushed_cache(pushed_cache)
+            await save_pushed_cache(pushed_cache)
             logger.info(f"[燕云助手] 缓存已更新，当前共 {len(pushed_cache)} 条记录")
 
     except Exception as e:

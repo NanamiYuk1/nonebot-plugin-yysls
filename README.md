@@ -123,6 +123,11 @@ YYSLS_CHECK_INTERVAL=30
 # 商城提醒触发时间（24小时制，小时）
 YYSLS_SHOP_REMIND_HOUR=10
 
+# ===== 定时任务核心配置 =====
+# 无需修改此处配置
+APSCHEULER_AUTOSTART=true
+YYSLS_TIMEZONE=Asia/Shanghai
+
 # 官网公告 API 地址（通常无需修改，使用内置默认值即可）
 # YYSLS_NEWS_URL=https://yysls.qq.com/act/a20240605news/index.html
 

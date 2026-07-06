@@ -1,4 +1,3 @@
-# auto_extract.py
 import re
 import time
 from typing import Optional, Tuple, Dict, List
@@ -23,7 +22,6 @@ TRIGGER_PATTERN = re.compile(
 # 内存级限流记录 {user_id: [timestamp1, timestamp2, ...]}
 _rate_limit_cache: Dict[int, List[float]] = {}
 
-
 def _check_rate_limit(user_id: int) -> bool:
     """检查用户是否超出频率限制，未超限则记录本次时间戳"""
     now = time.time()
@@ -42,7 +40,6 @@ def _check_rate_limit(user_id: int) -> bool:
     _rate_limit_cache[user_id].append(now)
     return True
 
-
 def _is_valid_code(code: str) -> bool:
     """校验兑换码内容合法性"""
     # 长度校验（2~24位）
@@ -57,7 +54,6 @@ def _is_valid_code(code: str) -> bool:
     )
     return has_alpha_or_cn
 
-
 def extract_cdkey_from_text(text: str) -> Optional[str]:
     """从已确认包含触发词的文本中提取兑换码"""
     normalized = text.replace(":", "：")
@@ -66,8 +62,7 @@ def extract_cdkey_from_text(text: str) -> Optional[str]:
         return match.group(1).strip()
     return None
 
-
-def try_auto_add_cdkey(text: str, source: str, user_id: int = 0) -> Tuple[Optional[str], Optional[str]]:
+async def try_auto_add_cdkey(text: str, source: str, user_id: int = 0) -> Tuple[Optional[str], Optional[str]]:
     """尝试从文本提取并录入兑换码（含完整防护链路）"""
     # 1. 频率限制检查
     if user_id and not _check_rate_limit(user_id):
@@ -84,8 +79,8 @@ def try_auto_add_cdkey(text: str, source: str, user_id: int = 0) -> Tuple[Option
         logger.warning(f"[自动提取·拦截] 非法兑换码格式: {code} | 用户: {user_id}")
         return None, "❌ 兑换码格式不合法，请检查后重试"
 
-    # 4. 执行录入
-    result = add_cdkey(code, source=source)
+    # 4. 执行录入 (🔥 核心修复：必须 await 异步函数)
+    result = await add_cdkey(code, source=source)
 
     if result == "added":
         logger.info(f"[自动提取] 新兑换码 {code} 已录入 | 用户: {user_id} | 来源: {source}")
