@@ -1,11 +1,5 @@
 """
 NoneBot2 插件 - 燕云十六声 助手
-功能：
-  1. 官网公告自动推送（版本更新、维护公告等）
-  2. 兑换码管理与查询（含转发消息自动解析中文/英文兑换码）
-  3. 每月商城限时道具提醒
-  4. 每周/每月必换资源清单提醒
-  5. B站动态 AI 自动抓取与兑换码提取
 """
 
 from nonebot import get_plugin_config, on_command, on_message, require, logger
@@ -15,13 +9,12 @@ from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
 from nonebot.adapters.onebot.v11.permission import GROUP_ADMIN, GROUP_OWNER
 
-# ✅ 确保 apscheduler 在导入子模块前被加载
 require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler
 
 from .config import YyslsConfig
 from .data_manager import load_subscribed_groups, save_subscribed_groups
-from .announcements import check_and_push_announcements
+from .announcements import check_and_push_announcements, get_http_content, parse_announcements
 from .ai_extractor import process_new_dynamics
 from .cdkey import (
     handle_cdkey_list,
@@ -38,18 +31,9 @@ from .shop_reminder import (
 )
 from .auto_extract import try_auto_add_cdkey
 
-# ============================================================
-#  配置与元数据
-# ============================================================
-
 plugin_config = get_plugin_config(YyslsConfig)
-
-# 🆕 使用独立变量管理订阅群，避免直接修改 Pydantic Model 属性
-# 🔥 修复：改为在启动时异步加载，或者在定时任务中实时加载
-# 这里为了兼容原有逻辑，保留内存缓存，但在订阅/取消时必须同步更新内存和磁盘
 _subscribed_groups: set = set()
 
-# 提供一个初始化函数，在 Bot 启动时调用
 from nonebot import get_driver
 driver = get_driver()
 
@@ -61,7 +45,7 @@ async def _load_groups_on_startup():
 
 __plugin_meta__ = PluginMetadata(
     name="燕云十六声助手",
-    description="燕云十六声游戏助手：公告推送、兑换码管理、商城与资源提醒、B站AI抓码",
+    description="燕云十六声游戏助手：公告推送、兑换码管理、商城与资源提醒、B 站 AI 抓码",
     usage="发送 /yysls_help 或 燕云帮助 查看完整指令菜单",
     config=YyslsConfig,
 )
@@ -78,13 +62,10 @@ __plugin_meta__ = PluginMetadata(
 )
 async def _check_news():
     await check_and_push_announcements(
-        subscribe_groups=_subscribed_groups,  # ✅ 使用独立变量
+        subscribe_groups=_subscribed_groups,
         news_url=plugin_config.yysls_news_url,
         base_url=plugin_config.yysls_news_base_url,
     )
-
-# 🆕 注意：B站动态检查的定时任务已在 ai_extractor.py 中通过 @scheduler.scheduled_job 自动注册
-# 当本文件 import ai_extractor 时，该定时任务会自动生效，无需在此处重复注册。
 
 @scheduler.scheduled_job(
     "cron", day=1,
@@ -94,7 +75,7 @@ async def _check_news():
 )
 async def _monthly_shop_reminder_refresh():
     await send_shop_reminder(
-        subscribe_groups=_subscribed_groups,  # ✅ 使用独立变量
+        subscribe_groups=_subscribed_groups,
         shop_items=plugin_config.yysls_shop_items,
         remind_type="refresh",
     )
@@ -107,7 +88,7 @@ async def _monthly_shop_reminder_refresh():
 )
 async def _monthly_shop_reminder_expire():
     await send_shop_reminder(
-        subscribe_groups=_subscribed_groups,  # ✅ 使用独立变量
+        subscribe_groups=_subscribed_groups,
         shop_items=plugin_config.yysls_shop_items,
         remind_type="expire",
     )
@@ -120,14 +101,13 @@ async def _monthly_shop_reminder_expire():
 )
 async def _weekly_digest():
     await send_cdkey_digest(
-        subscribe_groups=_subscribed_groups,  # ✅ 使用独立变量
+        subscribe_groups=_subscribed_groups,
     )
 
 # ============================================================
 #  命令注册
 # ============================================================
 
-# 🆕 优化帮助文本，明确说明 B站AI抓码是全自动的
 HELP_TEXT = """[燕云十六声助手 - 指令菜单]
 ========================
 【日常查询】(所有人可用)
@@ -141,15 +121,15 @@ HELP_TEXT = """[燕云十六声助手 - 指令菜单]
 /edit_note <码> <备注> - 修改兑换码备注
 /expire_cdkey <码> - 标记兑换码为过期
 /re_cdkey <码> - 重新激活已过期的兑换码
-/check_bili - 手动触发检查B站最新动态
-*Bot 会全自动定时巡查B站官方动态，利用 AI 捕获并入库新兑换码，无需手动干预。若有遗漏，可使用上方指令手动补录。
+/check_bili - 手动测试兑换码抓取 (调试用)
+/check_news - 手动测试燕云官网公告抓取 (调试用)
 
 【订阅与系统】(仅管理员)
 /yysls_sub (订阅燕云) - 开启本群自动推送
 /yysls_unsub (取消订阅燕云) - 关闭本群自动推送
 /yysls_status (燕云状态) - 查看插件运行状态
 ========================
-提示: 括号内为指令别名，可直接替代主指令使用。"""
+提示：括号内为指令别名，可直接替代主指令使用。"""
 
 help_cmd = on_command("yysls_help", aliases={"燕云帮助", "助手帮助", "yysls_menu"}, priority=10, block=True)
 
@@ -181,9 +161,9 @@ async def _(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     text = args.extract_plain_text().strip()
     if not text:
         await bot.send(event,
-            "用法说明：\n"
+            "用法说明:\n"
             "【单条录入】\n/add_cdkey <兑换码> [备注]\n\n"
-            "【批量录入】(使用换行分隔)\n/add_cdkey\n<码1> <备注1>\n<码2> <备注2>\n..."
+            "【批量录入】(使用换行分隔)\n/add_cdkey\n<码 1> <备注 1>\n<码 2> <备注 2>\n..."
         )
         return
 
@@ -195,7 +175,6 @@ async def _(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
         note = parts[1].strip() if len(parts) > 1 else ""
 
         from .cdkey import add_cdkey
-        # 🔥 核心修复：单条录入必须 await
         result = await add_cdkey(code, source="管理员手动录入", note=note)
 
         if result == "added":
@@ -217,7 +196,7 @@ async def _(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
         code = parts[0].strip().upper()
         note = parts[1].strip() if len(parts) > 1 else ""
         if len(code) < 4:
-            error_lines.append(f"格式错误: {line}")
+            error_lines.append(f"格式错误：{line}")
             continue
         result = await add_cdkey(code, source="管理员批量录入", note=note)
         if result == "added":
@@ -230,13 +209,13 @@ async def _(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
             skipped_exists += 1
 
     report = "[批量录入完成]\n"
-    report += f"新增成功: {success_added} 个\n"
+    report += f"新增成功：{success_added} 个\n"
     if success_reactivated > 0:
-        report += f"重新激活: {success_reactivated} 个\n"
+        report += f"重新激活：{success_reactivated} 个\n"
     if success_updated > 0:
-        report += f"更新备注: {success_updated} 个\n"
+        report += f"更新备注：{success_updated} 个\n"
     if skipped_exists > 0:
-        report += f"已存在跳过: {skipped_exists} 个\n"
+        report += f"已存在跳过：{skipped_exists} 个\n"
     if error_lines:
         report += "\n失败列表:\n" + "\n".join(error_lines)
     await bot.send(event, report)
@@ -259,7 +238,6 @@ expire_cdkey_cmd = on_command("expire_cdkey", priority=5, block=True)
 async def _(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     await handle_expire_cdkey(bot, event, args)
 
-# --- /check_bili 手动检查B站动态 ---
 check_bili_cmd = on_command(
     "check_bili",
     priority=5,
@@ -269,26 +247,56 @@ check_bili_cmd = on_command(
 
 @check_bili_cmd.handle()
 async def _(bot: Bot, event: MessageEvent):
-    await bot.send(event, "🔍 正在检查 B站官方动态，请稍候...")
+    await bot.send(event, "🔍 正在检查 B 站官方动态，请稍候...")
     try:
-        # 🆕 接收 process_new_dynamics 的返回值（新发现的兑换码数量）
         new_codes_count = await process_new_dynamics()
         
         if new_codes_count and new_codes_count > 0:
-            await bot.send(event, f"✅ B站动态检查完成！\n🎉 发现 {new_codes_count} 个新兑换码，已自动入库并推送至订阅群。")
+            await bot.send(event, f"✅ B 站动态检查完成！\n🎉 发现 {new_codes_count} 个新兑换码，已自动入库并推送至订阅群。")
         else:
-            await bot.send(event, "✅ B站动态检查完成！\n当前暂无新的兑换码。")
+            await bot.send(event, "✅ B 站动态检查完成！\n当前暂无新的兑换码。")
     except Exception as e:
-        logger.error(f"[手动检查] 执行失败: {e}")
+        logger.error(f"[手动检查] 执行失败：{e}")
         await bot.send(event, f"❌ 检查失败，请查看后台日志：{e}")
 
-# --- 群订阅管理 ---
+# 🆕 新增：手动测试官网公告抓取
+check_news_cmd = on_command(
+    "check_news",
+    priority=5,
+    block=True,
+    permission=SUPERUSER | GROUP_ADMIN | GROUP_OWNER,
+)
+
+@check_news_cmd.handle()
+async def _(bot: Bot, event: MessageEvent):
+    await bot.send(event, "🔍 正在抓取官网公告，请稍候...")
+    try:
+        html = await get_http_content(plugin_config.yysls_news_url)
+        if not html:
+            await bot.send(event, "❌ 抓取官网 HTML 失败，请检查网络或 URL 配置。")
+            return
+            
+        announcements = parse_announcements(html, plugin_config.yysls_news_base_url)
+        if not announcements:
+            await bot.send(event, "⚠️ 未解析到任何有效公告链接。可能是官网结构变更，请查看后台日志。")
+            return
+            
+        msg = f"✅ 成功抓取 {len(announcements)} 条官网公告:\n\n"
+        for i, ann in enumerate(announcements[:5], 1):  # 只显示前 5 条
+            msg += f"{i}. {ann['title']}\n   {ann['link']}\n\n"
+        if len(announcements) > 5:
+            msg += f"...还有 {len(announcements) - 5} 条未显示"
+            
+        await bot.send(event, msg)
+    except Exception as e:
+        logger.error(f"[手动检查新闻] 执行失败：{e}")
+        await bot.send(event, f"❌ 检查失败：{e}")
+
 sub_cmd = on_command("yysls_sub", aliases={"订阅燕云"}, priority=5, block=True)
 unsub_cmd = on_command("yysls_unsub", aliases={"取消订阅燕云"}, priority=5, block=True)
 status_cmd = on_command("yysls_status", aliases={"燕云状态"}, priority=10, block=True)
 
 async def _check_admin_permission(bot: Bot, event: MessageEvent) -> bool:
-    """检查是否为群主/管理员/超级用户"""
     if not isinstance(event, GroupMessageEvent):
         return False
     sender_role = getattr(event.sender, 'role', '')
@@ -306,12 +314,11 @@ async def _(bot: Bot, event: MessageEvent):
         return
 
     group_id = event.group_id
-    if group_id in _subscribed_groups:  # ✅ 使用独立变量
+    if group_id in _subscribed_groups:
         await bot.send(event, f"本群 ({group_id}) 已在订阅列表中，无需重复订阅")
         return
 
-    _subscribed_groups.add(group_id)  # ✅ 使用独立变量
-    # 🔥 核心修复：必须 await 异步保存函数
+    _subscribed_groups.add(group_id)
     await save_subscribed_groups(_subscribed_groups)  
     await bot.send(event, f"本群 ({group_id}) 已订阅燕云十六声公告推送！")
 
@@ -326,12 +333,11 @@ async def _(bot: Bot, event: MessageEvent):
         return
 
     group_id = event.group_id
-    if group_id not in _subscribed_groups:  # ✅ 使用独立变量
+    if group_id not in _subscribed_groups:
         await bot.send(event, f"本群 ({group_id}) 未订阅，无需取消")
         return
 
-    _subscribed_groups.discard(group_id)  # ✅ 使用独立变量
-    # 🔥 核心修复：必须 await 异步保存函数
+    _subscribed_groups.discard(group_id)
     await save_subscribed_groups(_subscribed_groups)  
     await bot.send(event, f"本群 ({group_id}) 已取消订阅燕云十六声公告推送")
 
@@ -339,39 +345,35 @@ async def _(bot: Bot, event: MessageEvent):
 async def _(bot: Bot, event: MessageEvent):
     is_subscribed = (
         isinstance(event, GroupMessageEvent)
-        and event.group_id in _subscribed_groups  # ✅ 使用独立变量
+        and event.group_id in _subscribed_groups
     )
 
     from .cdkey import get_active_cdkeys
-    active_keys = await get_active_cdkeys()  # 🆕 加上 await 等待异步执行完成
+    active_keys = await get_active_cdkeys()
     active_count = len(active_keys)
 
     msg = (
         f"[燕云十六声助手 - 运行状态]\n"
         f"========================\n"
-        f"公告检查间隔: {plugin_config.yysls_check_interval} 分钟\n"
-        f"订阅群数量: {len(_subscribed_groups)} 个\n"  # ✅ 使用独立变量
-        f"可用兑换码: {active_count} 个\n"
-        f"商城提醒: 每月1日 & 月末最后一天 {plugin_config.yysls_shop_remind_hour}:00\n"
-        f"B站AI抓码: 每 24 小时自动巡查\n"  # 🆕 补充 B站状态
+        f"公告检查间隔：{plugin_config.yysls_check_interval} 分钟\n"
+        f"订阅群数量：{len(_subscribed_groups)} 个\n"
+        f"可用兑换码：{active_count} 个\n"
+        f"商城提醒：每月 1 日 & 月末最后一天 {plugin_config.yysls_shop_remind_hour}:00\n"
+        f"B 站 AI 抓码：每 24 小时自动巡查\n"
         f"========================\n"
     )
 
     if isinstance(event, GroupMessageEvent):
         sub_status = "[已订阅]" if is_subscribed else "[未订阅]"
-        msg += f"本群订阅状态: {sub_status}"
+        msg += f"本群订阅状态：{sub_status}"
     else:
         groups_str = (
-            ", ".join(map(str, _subscribed_groups))  # ✅ 使用独立变量
+            ", ".join(map(str, _subscribed_groups))
             if _subscribed_groups else "无"
         )
-        msg += f"订阅群号: {groups_str}"
+        msg += f"订阅群号：{groups_str}"
 
     await bot.send(event, msg)
-
-# ============================================================
-#  转发消息自动解析兑换码（全员可用 + 固定前缀 + 恶意防护）
-# ============================================================
 
 AUTO_EXTRACT_TRIGGER = "燕云十六声兑换码："
 
@@ -379,29 +381,22 @@ auto_cdkey_listener = on_message(priority=99, block=False)
 
 @auto_cdkey_listener.handle()
 async def _(bot: Bot, event: MessageEvent):
-    # ========== 安全过滤 ==========
-    # 1. 仅处理群聊消息（私聊不触发，避免个人聊天误录）
     if not isinstance(event, GroupMessageEvent):
         return
 
-    # 2. 忽略机器人自身消息
     if event.self_id == event.user_id:
         return
 
-    # 3. 强制前置触发词校验（兼容全半角冒号）
     text = event.get_plaintext().strip()
     normalized_text = text.replace(":", "：")
     if AUTO_EXTRACT_TRIGGER not in normalized_text:
         return
 
-    # ========== 执行提取与录入（含频率限制与内容校验） ==========
-    # 🔥 核心修复：try_auto_add_cdkey 现在是异步函数，必须 await
     code, feedback = await try_auto_add_cdkey(
         text=text,
         source=f"群{event.group_id}用户{event.user_id}自动提取",
         user_id=event.user_id,
     )
 
-    # 新录入/重新激活/限流提示/格式错误均反馈，已存在则静默避免刷屏
     if feedback:
         await bot.send(event, f"[燕云助手·自动识别]\n{feedback}: {code}")
