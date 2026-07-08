@@ -65,7 +65,8 @@ async def add_cdkey(code: str, source: str = "手动录入", note: str = "") -> 
     await save_cdkeys(cdkeys)
     return "added"
 
-async def get_active_cd_keys() -> List[Dict]:
+# 🔥 修复：统一函数名为 get_active_cdkeys (去掉了中间的下划线)
+async def get_active_cdkeys() -> List[Dict]:
     cdkeys = await load_cdkeys()
     return [item for item in cdkeys if not item.get("expired", False)]
 
